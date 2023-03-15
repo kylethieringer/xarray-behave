@@ -70,7 +70,7 @@ def get_loader(kind: str, basename: str, stop_after_match: bool = True, basename
         [type]: [description]
     """
     if kind not in kinds:
-        raise ValueError(f"Unknow kind {kind} - must be in {kinds}.")
+        raise ValueError(f"Unknown kind {kind} - must be in {kinds}.")
 
     loaders = []
     for suffix in kinds[kind]:

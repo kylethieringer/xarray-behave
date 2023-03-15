@@ -10,7 +10,7 @@ import scipy.stats
 from scipy.ndimage import maximum_filter1d
 from samplestamps import SampStamp
 import math
-
+import os
 
 def rotate_point(point: Tuple[float, float], degrees: float, origin: Tuple[float, float] = (0, 0)) -> Tuple[float, float]:
     """Rotates 2D point around another point.
@@ -299,6 +299,42 @@ def load_times(filepath_timestamps, filepath_daq):
     # ss = SampStamp(sample_times=daq_stamps[:, 0] - f0, frame_times=cam_stamps[:, 0] - f0, sample_numbers=daq_samplenumber[:, 0])
 
     return ss, last_sample, sampling_rate_Hz
+
+def load_exptSync(basename):
+    """ synchronizing sample and frame numbers for murthy lab data"""
+    if not os.path.isdir(basename):
+        exptDir = os.path.dirname(basename)
+    else:
+        exptDir = basename
+
+    with h5py.File(os.path.join(exptDir, "daq.h5"), 'r') as f:
+        try:
+            trigger = f["sync"][:]
+        except KeyError:
+            trigger = f["Sync"][:]
+
+            # Threshold exposure signal.
+        trigger[trigger[:] < 1.5] = 0
+        trigger[trigger[:] > 1.5] = 1
+
+        # Find connected components.
+        daq2frame, n_frames = scipy.ndimage.label(trigger)
+
+        # Compute sample at each frame.
+        frame_idx, frame_time, count = np.unique(daq2frame, return_index=True,
+                                                 return_counts=True)
+        frame_to_daq_sample = frame_time[1:] + (count[1:] - 1) / 2
+
+        # Interpolate frame at each sample.
+        f = scipy.interpolate.interp1d(
+            frame_to_daq_sample,
+            np.arange(frame_to_daq_sample.shape[0]),
+            kind="nearest",
+            fill_value="extrapolate"
+        )
+        daq_to_frame_idx = f(np.arange(trigger.shape[0]))
+
+        return frame_to_daq_sample, daq_to_frame_idx
 
 
 def load_movietimes(filepath_timestamps, filepath_daq):

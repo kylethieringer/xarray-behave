@@ -1,0 +1,123 @@
+main:
+
+- name: target_samplingrate
+  label: Target sampling rate (0=use frametimes)
+  type: int
+  range: 0,1000000
+  default: 0
+
+- name: ignore_tracks
+  label: Ignore tracks
+  type: bool
+  default: False
+
+- name: fix_fly_indices
+  label: Fix fly indices from swap file
+  type: bool
+  default: False
+
+- name: video_filename
+  label: Video file
+  type: file_open
+  default: ""
+  help: 'select custom filename'
+
+- name: frame_fliplr
+  label: Flip video frames left-right
+  type: bool
+  default: False
+
+- name: frame_flipud
+  label: Flip video frames up-down
+  type: bool
+  default: False
+
+- name: box_size_px
+  label: Crop width and height (pixels)
+  type: int
+  range: 0,10000
+  default: 200
+
+- name: pixel_size_mm
+  label: Size of a pixel in the video (mm)
+  type: optional_double
+  default_disabled: True
+  decimals: 3
+  range: 0,10000
+  default: 1.0
+
+- name: ignore_song
+  label: Ignore song
+  type: bool
+  default: False
+
+- name: spec_freq_min
+  label: Min freq in spec display
+  type: optional_double
+  default_disabled: True
+  range: 0.0,1000000.0
+  default: 50.0
+
+- name: spec_freq_max
+  label: Max freq in spec display
+  type: optional_double
+  default_disabled: True
+  range: 0.0,1000000.0
+  default: 1000.0
+
+- name: annotation_path
+  label: File with annotations
+  type: file_open
+  default: ""
+  help: 'will try default STEM + _annotations.csv'
+
+- name: init_annotations
+  label: Initialize annotations
+  type: bool
+  default: False
+
+- name: events_string
+  label: Initialize event names and categories (event, segment)
+  type: string
+  default: "pulse_manual,event;sine_manual,segment"
+
+- name: filter_song
+  label: Bandpass filter song
+  type: stacked
+  default: "no"
+  options: "no,yes"
+
+  "no":
+
+  "yes":
+  - name: f_low
+    label: Lower cutoff
+    type: double
+    default: 50.0
+    range: 0.0,1000000.0
+
+  - name: f_high
+    label: Upper cutoff
+    type: double
+    default: 1000.0
+    range: 0.0,1000000.0
+
+
+- name: load_cues
+  label: Load cue points
+  type: stacked
+  default: "no"
+  options: "no,yes"
+
+  "no":
+
+  "yes":
+  - name: cues_file
+    label: cues file
+    type: file_open
+    default: ""
+
+- name: generate
+  label: Load Data
+  type: button
+  default: main action

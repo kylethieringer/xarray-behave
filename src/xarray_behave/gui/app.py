@@ -111,6 +111,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.file_menu.addSeparator()
         self._add_keyed_menuitem(self.file_menu, "Load dataset", self.from_zarr)
         self.file_menu.addSeparator()
+        self._add_keyed_menuitem(self.file_menu, "Load Murthy Data", self.from_murthylab)
+        self.file_menu.addSeparator()
         self.file_menu.addAction("Exit")
 
         self.view_train = self.bar.addMenu("DAS")
@@ -123,6 +125,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.hb.addWidget(self.add_button("Load audio from file", self.from_file))
         self.hb.addWidget(self.add_button("Create dataset from ethodrome folder", self.from_dir))
         self.hb.addWidget(self.add_button("Load dataset (zarr)", self.from_zarr))
+        self.hb.addWidget(self.add_button("Load dataset (murthy)", self.from_murthylab))
 
         self.cb = pg.GraphicsLayoutWidget()
         self.cb.setLayout(self.hb)
@@ -1037,6 +1040,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
                 # add video file
                 vr = None
+
                 try:
                     if dialog.form["video_filename"] != "":
                         try:
@@ -1072,6 +1076,176 @@ class MainWindow(QtWidgets.QMainWindow):
                     box_size=dialog.form["box_size_px"],
                     data_source=DataSource("dir", dirname),
                 )
+
+    @classmethod
+    def from_murthylab(
+        cls,
+        dirname=None,
+        app=None,
+        qt_keycode=None,
+        events_string="",
+        spec_freq_min=None,
+        spec_freq_max=None,
+        target_samplingrate=None,
+        box_size=None,
+        pixel_size_mm=None,
+        skip_dialog: bool = False,
+        is_das: bool = False,
+    ):
+
+        if not dirname:
+            dirname = QtWidgets.QFileDialog.getExistingDirectory(parent=None, caption="Select data directory")
+        if dirname:
+            dialog = YamlDialog(
+                yaml_file=package_dir + "/gui/forms/from_murthylab.yaml", title=f"Dataset from data directory {dirname}"
+            )
+
+            # initialize form data with cli args
+            dialog.form["pixel_size_mm"] = pixel_size_mm  # and un-disable
+            dialog.form["spec_freq_min"] = spec_freq_min
+            dialog.form["spec_freq_max"] = spec_freq_max
+            if box_size is not None:
+                dialog.form["box_size_px"] = box_size
+            if target_samplingrate is not None:
+                dialog.form["target_samplingrate"] = target_samplingrate
+            if len(events_string):
+                dialog.form["init_annotations"] = True
+                dialog.form["events_string"] = events_string
+
+            if not skip_dialog:
+                dialog.show()
+                result = dialog.exec_()
+            else:
+                result = QtWidgets.QDialog.Accepted
+
+            if result == QtWidgets.QDialog.Accepted:
+                form_data = dialog.form.get_form_data()
+                logging.info(f"Making new dataset from directory {dirname}.")
+
+                if form_data["target_samplingrate"] == 0 or form_data["target_samplingrate"] is None:
+                    resample_video_data = False
+                else:
+                    resample_video_data = True
+
+                form_data["filter_song"] = form_data["filter_song"] == "yes"
+
+                include_tracks = not form_data["ignore_tracks"]
+                include_poses = not form_data["ignore_tracks"]
+                lazy_load_song = not form_data["filter_song"]  # faster that way
+                base, datename = os.path.split(os.path.normpath(dirname))  # normpath removes trailing pathsep
+
+                # we keep our datasets all in one directory
+                # this just makes all directories point to the same place
+                # root, dat_path = os.path.split(base)
+                root = base
+                dat_path = ""
+
+                # hardcoding in filepaths for now, need to make this better
+                form_data['video_filename'] = str(Path(root, datename, "000000.mp4"))
+                filepath_daq = Path(root, datename, f"{datename}.npz")
+                filepath_video = None if not len(form_data["video_filename"]) else form_data["video_filename"]
+                annotation_path = None if not len(form_data["annotation_path"]) else form_data["annotation_path"]
+
+                logging.info(f"datename == {datename}")
+                logging.info(f"root == {root}")
+                logging.info(f"filepath_daq == {filepath_daq}")
+                logging.info(f"filepath_annotations == {annotation_path}")
+                logging.info(f"filepath_video == {filepath_video}")
+                logging.info(f"fix_fly_indices == {form_data['fix_fly_indices']}")
+                logging.info(f"include_song == {~form_data['ignore_song']}")
+                logging.info(f"target_sampling_rate == {150}")
+                logging.info(f"audio_sampling_rate == {10_000}")
+                logging.info(f"resample_video_data == {resample_video_data}")
+
+                ds = xb.assemble(
+                    datename,
+                    root,
+                    dat_path="",
+                    res_path="",
+                    filepath_daq = filepath_daq,
+                    filepath_annotations=annotation_path,
+                    filepath_video=filepath_video,
+                    fix_fly_indices=form_data["fix_fly_indices"],
+                    include_song=~form_data["ignore_song"],
+                    # target_sampling_rate=,
+                    audio_sampling_rate=10_000,
+                    resample_video_data=resample_video_data,
+
+                    lazy_load_song=lazy_load_song,
+                    include_tracks=include_tracks,
+                    include_poses=include_poses,
+                    include_balltracker=False
+                )
+
+                if form_data["filter_song"]:
+                    ds = cls.filter_song(ds, form_data["f_low"], form_data["f_high"])
+
+                event_names = []
+                event_classes = []
+                if form_data["init_annotations"] and len(form_data["events_string"]):
+                    for pair in form_data["events_string"].split(";"):
+                        items = pair.strip().split(",")
+                        if len(items) > 0:
+                            event_names.append(items[0].strip())
+                        if len(items) > 1:
+                            event_classes.append(items[1].strip())
+                        else:
+                            event_classes.append("segment")
+
+                # add event categories if they are missing in the dataset
+                if "song_events" in ds and "event_categories" not in ds:
+                    event_categories = [
+                        "segment" if "sine" in evt or "syllable" in evt else "event" for evt in ds.event_types.values
+                    ]
+                    ds = ds.assign_coords({"event_categories": (("event_types"), event_categories)})
+
+                # add missing song types
+                if "song_events" not in ds or len(ds.event_types) == 0:
+                    cats = {event_name: event_class for event_name, event_class in zip(event_names, event_classes)}
+                    ds.attrs["event_times"] = annot.Events(categories=cats)
+                    # FIXME update ds.song_events!!
+
+                # add video file
+                vr = None
+
+                try:
+                    if dialog.form["video_filename"] != "":
+                        try:
+                            video_filename = dialog.form["video_filename"]
+                            vr = utils.VideoReaderNP(video_filename)
+                        except:
+                            pass
+                    else:
+                        try:
+                            video_filename = os.path.join(dirname, datename + ".mp4")
+                            vr = utils.VideoReaderNP(video_filename)
+                        except:
+                            video_filename = os.path.join(dirname, datename + ".avi")
+                            vr = utils.VideoReaderNP(video_filename)
+
+                    logging.info(vr)
+                except FileNotFoundError:
+                    logging.info(f'Video "{video_filename}" not found. Continuing without.')
+                except:
+                    logging.info("Something went wrong when loading the video. Continuing without.")
+
+                cue_points = []
+                if form_data["load_cues"] == "yes":
+                    cue_points = cls.load_cuepoints(form_data["cues_file"])
+                return PSV(
+                    ds,
+                    title=dirname,
+                    cue_points=cue_points,
+                    vr=vr,
+                    fmin=dialog.form["spec_freq_min"],
+                    fmax=dialog.form["spec_freq_max"],
+                    frame_fliplr=dialog.form["frame_fliplr"],
+                    frame_flipud=dialog.form["frame_flipud"],
+                    box_size=dialog.form["box_size_px"],
+                    data_source=DataSource("dir", dirname),
+                    frame_interval_override = 150,
+                )
+
 
     @classmethod
     def from_zarr(
@@ -1279,6 +1453,7 @@ class PSV(MainWindow):
         data_source: Optional[DataSource] = None,
         frame_fliplr: bool = False,
         frame_flipud: bool = False,
+        frame_interval_override: Optional[int] = None,
     ):
         super().__init__(title=title)
         pg.setConfigOptions(useOpenGL=False)  # appears to be faster that way
@@ -1411,11 +1586,15 @@ class PSV(MainWindow):
             self.nb_channels = self.ds.song_raw.shape[1]
         else:
             self.fs_song = self.fs_other  # not sure this would work?
-
+        # import pdb; pdb.set_trace()
+        logging.info(f"fs_song == {self.fs_song}")
         if self.vr is not None:
             self.frame_interval = self.fs_song / self.vr.frame_rate  # song samples? TODO: get from self.ds
         else:
             self.frame_interval = self.fs_song / 1_000
+
+        if frame_interval_override is not None:
+            self.frame_interval = self.fs_song / 150
 
         self._span = int(self.fs_song)
         self._t0 = int(self.span / 2)
@@ -1430,6 +1609,8 @@ class PSV(MainWindow):
         self._add_keyed_menuitem(self.file_menu, "New from ethodrome folder", self.from_dir)
         self.file_menu.addSeparator()
         self._add_keyed_menuitem(self.file_menu, "Load dataset", self.from_zarr)
+        self.file_menu.addSeparator()
+        self._add_keyed_menuitem(self.file_menu, "load murthy data", self.from_murthylab)
         self.file_menu.addSeparator()
         self._add_keyed_menuitem(self.file_menu, "Save swap files", self.save_swaps)
         self._add_keyed_menuitem(self.file_menu, "Save annotations", self.save_annotations)

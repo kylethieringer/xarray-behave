@@ -95,39 +95,71 @@ def assemble(
     if filepath_timestamps is None:
         filepath_timestamps = Path(root, dat_path, datename, f"{datename}_timestamps.h5")
 
+    # for readability
+    daq_exists = os.path.exists(filepath_daq)
+    timeStamps_exists = os.path.exists(filepath_timestamps)
+    video_exists = os.path.exists(filepath_video)
+
     # Create samplestamps object
     ss = None
-    if os.path.exists(filepath_daq) and os.path.exists(filepath_timestamps):
+    if daq_exists and timeStamps_exists:
         ss, last_sample_number, sampling_rate = ld.load_times(filepath_timestamps, filepath_daq)
         if sampling_rate is None:
             sampling_rate = audio_sampling_rate
         path_tried = (filepath_daq, filepath_timestamps)
-    elif os.path.exists(filepath_video):  # Video (+tracks) w/o DAQ
-        # if there is only the video, generate fake samples from fps
-        from videoreader import VideoReader
 
-        vr = VideoReader(filepath_video)
+    elif daq_exists and video_exists:
+        # if there is song and video information but no timestamps
+        # for murthy lab loading
 
-        if os.path.exists(filepath_timestamps):
-            frame_times = ld.load_timestamps(filepath_timestamps)
-            frame_times -= frame_times[0]
+        logging.info("Loading audio data:")
+        if not filepath_daq_is_custom:
+            basename = os.path.join(root, dat_path, datename, datename)
         else:
-            frame_times = np.arange(0, vr.number_of_frames, 1) / vr.frame_rate
+            basename = filepath_daq
+            if type(basename) != str: basename = str(basename)
 
-        if target_sampling_rate == 0 or target_sampling_rate is None:
-            resample_video_data = False
-            target_sampling_rate = vr.frame_rate
+        # import pdb; pdb.set_trace()
+        audio_loader = io.get_loader(kind="audio", basename=basename, basename_is_full_name=filepath_daq_is_custom)
+        if not audio_loader and filepath_daq_is_custom:
+            audio_loader = io.audio.AudioFile(basename)
+        try:
+            song_raw, non_song_raw, sampling_rate = audio_loader.load(
+                audio_loader.path,
+                song_channels=audio_channels,
+                return_nonsong_channels=True,
+                lazy=lazy_load_song,
+                audio_dataset=audio_dataset,
+            )
+            logging.info(f"   {audio_loader.path} loaded using {audio_loader.NAME}.")
+            if sampling_rate is None:
+                sampling_rate = audio_sampling_rate
 
-        frame_times[-1] = frame_times[-2]  # for auto-monotonize to not mess everything up
+            frame_to_daq_sample, daq_to_frame_idx = ld.load_exptSync(basename)
 
-        sampling_rate = 10 * target_sampling_rate
-        sample_times = np.arange(0, vr.number_of_frames * vr.frame_rate, 1)  # 1s steps
-        sample_numbers = np.round(sample_times * sampling_rate)
-        last_sample_number = len(sample_times)
+            last_sample_number = frame_to_daq_sample[-1]
+            last_frame_number = frame_to_daq_sample.shape[-1]
 
-        ss = SampStamp(sample_times, frame_times, sample_numbers=sample_numbers)
-        path_tried = (filepath_video,)
-    elif os.path.exists(filepath_daq) and not os.path.exists(filepath_timestamps):  # Audio (+ annotations) only
+            sample_numbers = frame_to_daq_sample
+            frame_numbers = np.arange(0, frame_to_daq_sample.shape[0])
+
+            if sample_numbers[-1] < last_sample_number:
+                sample_numbers = np.append(sample_numbers, last_sample_number)
+            if frame_numbers[-1] < last_frame_number:
+                frame_numbers = np.append(frame_numbers, last_frame_number)
+
+            sample_times = sample_numbers / sampling_rate
+            frame_times = sample_times
+
+            # import pdb;pdb.set_trace()
+
+            ss = SampStamp(sample_times, frame_times, sample_numbers=sample_numbers, frame_numbers=frame_numbers)
+
+        except:
+            raise ValueError(f"Loading {audio_loader.path} using {audio_loader.NAME} failed.")
+        path_tried = (filepath_daq,)
+
+    elif daq_exists and not timeStamps_exists:  # Audio (+ annotations) only
         # if there is no video and no timestamps - generate fake from samplerate and number of samples
         # THIS SHOULD BE THE FIRST THING WE DO:
         logging.info("Loading audio data:")
@@ -135,7 +167,8 @@ def assemble(
             basename = os.path.join(root, dat_path, datename, datename)
         else:
             basename = filepath_daq
-
+            if type(basename) != str: basename=str(basename)
+        # import pdb; pdb.set_trace()
         audio_loader = io.get_loader(kind="audio", basename=basename, basename_is_full_name=filepath_daq_is_custom)
         if not audio_loader and filepath_daq_is_custom:
             audio_loader = io.audio.AudioFile(basename)
@@ -164,6 +197,33 @@ def assemble(
         except:
             raise ValueError(f"Loading {audio_loader.path} using {audio_loader.NAME} failed.")
         path_tried = (filepath_daq,)
+
+
+    elif video_exists:  # Video (+tracks) w/o DAQ
+        # if there is only the video, generate fake samples from fps
+        from videoreader import VideoReader
+
+        vr = VideoReader(filepath_video)
+
+        if os.path.exists(filepath_timestamps):
+            frame_times = ld.load_timestamps(filepath_timestamps)
+            frame_times -= frame_times[0]
+        else:
+            frame_times = np.arange(0, vr.number_of_frames, 1) / vr.frame_rate
+
+        if target_sampling_rate == 0 or target_sampling_rate is None:
+            resample_video_data = False
+            target_sampling_rate = vr.frame_rate
+
+        frame_times[-1] = frame_times[-2]  # for auto-monotonize to not mess everything up
+
+        sampling_rate = 10 * target_sampling_rate
+        sample_times = np.arange(0, vr.number_of_frames * vr.frame_rate, 1)  # 1s steps
+        sample_numbers = np.round(sample_times * sampling_rate)
+        last_sample_number = len(sample_times)
+
+        ss = SampStamp(sample_times, frame_times, sample_numbers=sample_numbers)
+        path_tried = (filepath_video,)
     else:
         raise ValueError(f"Nothing found at {(filepath_daq, filepath_video, filepath_timestamps)}.")
 
@@ -181,6 +241,7 @@ def assemble(
 
     if target_sampling_rate == 0 or target_sampling_rate is None:
         resample_video_data = False
+
     fps = 1 / np.mean(np.diff(ss.frames2times.y))
     if not resample_video_data:
         logging.info(f"  setting targetsamplingrate to avg. fps ({fps}).")
@@ -371,7 +432,10 @@ def assemble(
                 basename = os.path.join(root, dat_path, datename, datename)
             else:
                 basename = filepath_daq
+                if type(basename) != str:
+                    basename = str(basename)
 
+            # import pdb; pdb.set_trace()
             audio_loader = io.get_loader(kind="audio", basename=basename, basename_is_full_name=filepath_daq_is_custom)
             if not audio_loader and filepath_daq_is_custom:
                 audio_loader = io.audio.AudioFile(basename)
