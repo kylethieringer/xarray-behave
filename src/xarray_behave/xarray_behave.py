@@ -244,7 +244,7 @@ def assemble(
 
     fps = 1 / np.mean(np.diff(ss.frames2times.y))
     if not resample_video_data:
-        logging.info(f"  setting targetsamplingrate to avg. fps ({fps}).")
+        logging.info(f"  setting target sampling rate to avg. fps ({fps}).")
         target_sampling_rate = fps
 
     # LOAD TRACKS

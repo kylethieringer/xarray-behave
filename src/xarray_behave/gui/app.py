@@ -1090,7 +1090,6 @@ class MainWindow(QtWidgets.QMainWindow):
         box_size=None,
         pixel_size_mm=None,
         skip_dialog: bool = False,
-        is_das: bool = False,
     ):
 
         if not dirname:
@@ -1122,13 +1121,11 @@ class MainWindow(QtWidgets.QMainWindow):
                 form_data = dialog.form.get_form_data()
                 logging.info(f"Making new dataset from directory {dirname}.")
 
-                if form_data["target_samplingrate"] == 0 or form_data["target_samplingrate"] is None:
-                    resample_video_data = False
-                else:
-                    resample_video_data = True
+                resample_video_data = False
 
                 form_data["filter_song"] = form_data["filter_song"] == "yes"
 
+                # TODO add sleap tracking support
                 include_tracks = not form_data["ignore_tracks"]
                 include_poses = not form_data["ignore_tracks"]
                 lazy_load_song = not form_data["filter_song"]  # faster that way
@@ -1138,10 +1135,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 # this just makes all directories point to the same place
                 # root, dat_path = os.path.split(base)
                 root = base
-                dat_path = ""
 
                 # hardcoding in filepaths for now, need to make this better
-                form_data['video_filename'] = str(Path(root, datename, "000000.mp4"))
+                # form_data['video_filename'] = str(Path(root, datename, "000000.mp4"))
                 filepath_daq = Path(root, datename, f"{datename}.npz")
                 filepath_video = None if not len(form_data["video_filename"]) else form_data["video_filename"]
                 annotation_path = None if not len(form_data["annotation_path"]) else form_data["annotation_path"]
@@ -1151,9 +1147,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 logging.info(f"filepath_daq == {filepath_daq}")
                 logging.info(f"filepath_annotations == {annotation_path}")
                 logging.info(f"filepath_video == {filepath_video}")
-                logging.info(f"fix_fly_indices == {form_data['fix_fly_indices']}")
                 logging.info(f"include_song == {~form_data['ignore_song']}")
-                logging.info(f"target_sampling_rate == {150}")
                 logging.info(f"audio_sampling_rate == {10_000}")
                 logging.info(f"resample_video_data == {resample_video_data}")
 
@@ -1165,12 +1159,9 @@ class MainWindow(QtWidgets.QMainWindow):
                     filepath_daq = filepath_daq,
                     filepath_annotations=annotation_path,
                     filepath_video=filepath_video,
-                    fix_fly_indices=form_data["fix_fly_indices"],
                     include_song=~form_data["ignore_song"],
-                    # target_sampling_rate=,
                     audio_sampling_rate=10_000,
                     resample_video_data=resample_video_data,
-
                     lazy_load_song=lazy_load_song,
                     include_tracks=include_tracks,
                     include_poses=include_poses,
@@ -1224,18 +1215,17 @@ class MainWindow(QtWidgets.QMainWindow):
                             vr = utils.VideoReaderNP(video_filename)
 
                     logging.info(vr)
+                    logging.info("     Ignore fps above, this is automatically printed from mp4 file")
+                    logging.info("     refer to target sampling rate variable above for correct fps")
                 except FileNotFoundError:
                     logging.info(f'Video "{video_filename}" not found. Continuing without.')
                 except:
                     logging.info("Something went wrong when loading the video. Continuing without.")
 
-                cue_points = []
-                if form_data["load_cues"] == "yes":
-                    cue_points = cls.load_cuepoints(form_data["cues_file"])
+
                 return PSV(
                     ds,
                     title=dirname,
-                    cue_points=cue_points,
                     vr=vr,
                     fmin=dialog.form["spec_freq_min"],
                     fmax=dialog.form["spec_freq_max"],
@@ -1243,7 +1233,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     frame_flipud=dialog.form["frame_flipud"],
                     box_size=dialog.form["box_size_px"],
                     data_source=DataSource("dir", dirname),
-                    frame_interval_override = 150,
+                    frame_interval_override = 150, # currently PSV doesnt use ds to find frame intervals
                 )
 
 

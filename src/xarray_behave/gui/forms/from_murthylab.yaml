@@ -1,21 +1,5 @@
 main:
 
-- name: target_samplingrate
-  label: Target sampling rate (0=use frametimes)
-  type: int
-  range: 0,1000000
-  default: 0
-
-- name: ignore_tracks
-  label: Ignore tracks
-  type: bool
-  default: False
-
-- name: fix_fly_indices
-  label: Fix fly indices from swap file
-  type: bool
-  default: False
-
 - name: video_filename
   label: Video file
   type: file_open
@@ -44,7 +28,12 @@ main:
   default_disabled: True
   decimals: 3
   range: 0,10000
-  default: 1.0
+  default: 0.035
+
+- name: ignore_tracks
+  label: Ignore tracks
+  type: bool
+  default: False
 
 - name: ignore_song
   label: Ignore song
@@ -102,20 +91,6 @@ main:
     default: 1000.0
     range: 0.0,1000000.0
 
-
-- name: load_cues
-  label: Load cue points
-  type: stacked
-  default: "no"
-  options: "no,yes"
-
-  "no":
-
-  "yes":
-  - name: cues_file
-    label: cues file
-    type: file_open
-    default: ""
 
 - name: generate
   label: Load Data
